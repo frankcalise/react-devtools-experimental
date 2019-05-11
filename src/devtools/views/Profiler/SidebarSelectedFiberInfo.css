@@ -7,6 +7,7 @@
 }
 
 .Content {
+  flex: 0 0 auto;
   padding: 0.5rem;
   user-select: none;
   border-top: 1px solid var(--color-border);
@@ -55,4 +56,8 @@
 }
 .CurrentCommit:focus {
   outline: none;
+}
+
+.WhatChangedItem {
+  margin-top: 0.5rem;
 }

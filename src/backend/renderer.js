@@ -623,8 +623,97 @@ export function attach(
     return ((fiberToIDMap.get(primaryFiber): any): number);
   }
 
-  // eslint-disable-next-line no-unused-vars
-  function hasDataChanged(prevFiber: Fiber, nextFiber: Fiber): boolean {
+  // TODO (supenders) Is it important to handle context?
+  // TODO (supenders) Handle hooks somehow?
+  type ChangeDescription = {|
+    didHooksChange: boolean,
+    props: Array<string>,
+    state: Array<string>,
+  |};
+
+  function getChangeDescription(
+    prevFiber: Fiber,
+    nextFiber: Fiber
+  ): ChangeDescription | null {
+    switch (getElementTypeForFiber(nextFiber)) {
+      case ElementTypeClass:
+      case ElementTypeFunction:
+      case ElementTypeMemo:
+      case ElementTypeForwardRef:
+        return {
+          didHooksChange: didHooksChange(
+            prevFiber.memoizedState,
+            nextFiber.memoizedState
+          ),
+          props: getChangedKeys(
+            prevFiber.memoizedProps,
+            nextFiber.memoizedProps
+          ),
+          state: getChangedKeys(
+            prevFiber.memoizedState,
+            nextFiber.memoizedState
+          ),
+        };
+        break;
+      default:
+        return null;
+        break;
+    }
+  }
+
+  function didHooksChange(prev: any, next: any): boolean {
+    if (next == null) {
+      return false;
+    }
+
+    // We can't report anything meaningful for hooks changes.
+    if (
+      next.baseState != null &&
+      next.memoizedState != null &&
+      next.next != null &&
+      next.queue != null
+    ) {
+      while (next !== null) {
+        if (next.memoizedState !== prev.memoizedState) {
+          return true;
+        } else {
+          next = next.next;
+          prev = prev.next;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  // TODO (supenders) How will this handle hooks?
+  function getChangedKeys(prev: any, next: any): Array<string> {
+    const keys = [];
+
+    if (next == null) {
+      return keys;
+    }
+
+    // We can't report anything meaningful for hooks changes.
+    if (
+      next.baseState != null &&
+      next.memoizedState != null &&
+      next.next != null &&
+      next.queue != null
+    ) {
+      return keys;
+    }
+
+    // TODO (supenders) This does not account for props that were added or removed.
+    for (let key in prev) {
+      if (prev[key] !== next[key]) {
+        keys.push(key);
+      }
+    }
+    return keys;
+  }
+
+  function didFiberRender(prevFiber: Fiber, nextFiber: Fiber): boolean {
     switch (nextFiber.tag) {
       case ClassComponent:
       case FunctionComponent:
@@ -1016,7 +1105,7 @@ export function attach(
         pushOperation(treeBaseDuration);
       }
 
-      if (alternate ? hasDataChanged(alternate, fiber) : true) {
+      if (alternate ? didFiberRender(alternate, fiber) : true) {
         if (actualDuration != null) {
           // If profiling is active, store durations for elements that were rendered during the commit.
           // Note that we should do this for any fiber we performed work on, regardless of its actualDuration value.
@@ -1028,6 +1117,11 @@ export function attach(
             metadata.maxActualDuration,
             actualDuration
           );
+
+          const changeDescription = getChangeDescription(alternate, fiber);
+          if (changeDescription !== null) {
+            metadata.changeDescriptions.set(id, changeDescription);
+          }
         }
       }
     }
@@ -1279,6 +1373,7 @@ export function attach(
               (fiber: Fiber) => getFiberID(fiber) // TODO (schedulers) What if this gets unmounted?
             ),
             maxActualDuration: 0,
+            changeDescriptions: new Map(),
           };
         }
 
@@ -1324,6 +1419,7 @@ export function attach(
           (fiber: Fiber) => getFiberID(fiber) // TODO (schedulers) What if this gets unmounted?
         ),
         maxActualDuration: 0,
+        changeDescriptions: new Map(),
       };
     }
 
@@ -1971,6 +2067,7 @@ export function attach(
     interactions: Array<InteractionBackend>,
     schedulers: Array<number>,
     maxActualDuration: number,
+    changeDescriptions: Map<number, ChangeDescription>,
   |};
 
   type CommitProfilingMetadataMap = Map<number, Array<CommitProfilingData>>;
@@ -1997,6 +2094,9 @@ export function attach(
           interactions: commitProfilingData.interactions,
           actualDurations: commitProfilingData.actualDurations,
           schedulers: commitProfilingData.schedulers,
+          changeDescriptions: [
+            ...commitProfilingData.changeDescriptions.entries(),
+          ],
           rootID,
         };
       }
@@ -2012,6 +2112,7 @@ export function attach(
       actualDurations: [],
       schedulers: [],
       rootID,
+      changeDescriptions: [],
     };
   }
 
